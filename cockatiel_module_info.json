@@ -1,0 +1,35 @@
+{
+  "name": "fake-input",
+  "description": "Viewers spend points to trigger a fake keyboard/mouse input on the streamer's machine (!input left-click, !input hold-w, !input jump). Only inputs the streamer whitelists in config.json can be fired; nothing unlisted is ever sent. Requires Accessibility permission on macOS for synthetic events.",
+  "version": "0.1.0",
+  "capabilities": "preprocess",
+  "root_file": "./src/main.rs",
+  "launch_command": "cargo run",
+  "command_flags": ["--release"],
+  "binary": {
+    "linux": {
+      "aarch64": "target/release/cockatiel_fake_input",
+      "arm": "target/release/cockatiel_fake_input",
+      "x86_64": "target/release/cockatiel_fake_input"
+    },
+    "macos": {
+      "aarch64": "target/release/cockatiel_fake_input",
+      "arm": "target/release/cockatiel_fake_input",
+      "x86_64": "target/release/cockatiel_fake_input"
+    },
+    "windows": {
+      "aarch64": "target/release/cockatiel_fake_input.exe",
+      "arm": "target/release/cockatiel_fake_input.exe",
+      "x86_64": "target/release/cockatiel_fake_input.exe"
+    }
+  },
+  "build_command": "cargo",
+  "build_flags": ["build", "--release"],
+  "credentials": [
+    { "key": "price", "label": "Score cost per input", "list": false, "sensitive": false }
+  ],
+  "autostart": false,
+  "authority": 0,
+  "min_rank": 0,
+  "price": 10000
+}
