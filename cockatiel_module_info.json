@@ -1,6 +1,6 @@
 {
   "name": "fake-input",
-  "description": "Viewers spend points to trigger a fake keyboard/mouse input on the streamer's machine (!input left-click, !input hold-w, !input jump). Only inputs the streamer whitelists in config.json can be fired; nothing unlisted is ever sent. Requires Accessibility permission on macOS for synthetic events.",
+  "description": "Viewers spend points to trigger a fake input on the streamer's machine (!input left-click, !input hold-w, !input jump-btn). Keyboard/mouse inputs via enigo; gamepad inputs (button/stick) drive a virtual controller (Linux uinput, Windows ViGEmBus; macOS controller bridge unsupported until a signed helper ships). Only inputs the streamer whitelists in config.json can be fired; nothing unlisted is ever sent. Requires Accessibility permission on macOS for synthetic events.",
   "version": "0.1.0",
   "capabilities": "preprocess",
   "root_file": "./src/main.rs",

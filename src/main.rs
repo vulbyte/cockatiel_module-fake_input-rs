@@ -33,6 +33,10 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{error, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
+mod gamepad;
+
+use gamepad::{Gamepad, GamepadAction};
+
 type WsWriteHalf = futures_util::stream::SplitSink<
     tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
@@ -105,6 +109,28 @@ enum InputSpec {
         /// Relative y offset (positive = down).
         y: i32,
     },
+    /// A virtual gamepad action (controller bridge). `hold_ms` holds the
+    /// button/stick for that long; 0/absent = a quick tap (button click) or a
+    /// short stick push then release.
+    #[serde(rename = "gamepad")]
+    Gamepad {
+        /// "button": a named Xbox-style button (A/B/X/Y/LB/RB/LT/RT/Start/Back/
+        /// Dpad-*). "stick": move a stick ("left"/"right").
+        #[serde(default)]
+        button: Option<String>,
+        /// Which stick, when `button` is absent ("left"|"right").
+        #[serde(default)]
+        stick: Option<String>,
+        /// Stick x position in [-1, 1] (when `stick` is set).
+        #[serde(default)]
+        x: f64,
+        /// Stick y position in [-1, 1] (when `stick` is set).
+        #[serde(default)]
+        y: f64,
+        /// How long to hold (ms). 0 = a tap / short push.
+        #[serde(default)]
+        hold_ms: u64,
+    },
 }
 
 fn load_config(path: &Path) -> Config {
@@ -161,8 +187,66 @@ fn simulate(spec: &InputSpec) -> Result<(), String> {
                 .move_mouse(*x, *y, Coordinate::Rel)
                 .map_err(|e| format!("mouse move: {e}"))?;
         }
+        InputSpec::Gamepad { .. } => {
+            // Gamepad inputs are routed through the controller bridge
+            // (simulate_input), never through enigo.
+            return Err("gamepad inputs go through the controller bridge, not enigo".to_string());
+        }
     }
     Ok(())
+}
+
+/// Route a whitelisted input to the right backend: keyboard/mouse via enigo,
+/// or the virtual gamepad (controller bridge). Gamepad inputs hold the
+/// button/stick for `hold_ms` when set, otherwise tap.
+async fn simulate_input(spec: &InputSpec, gamepad: Option<&Arc<AsyncMutex<Gamepad>>>) -> Result<(), String> {
+    match spec {
+        InputSpec::Gamepad { button, stick, x, y, hold_ms } => {
+            // Build the action from the config (button XOR stick).
+            let action = if let Some(b) = button {
+                GamepadAction::Button { button: b.clone() }
+            } else if let Some(st) = stick {
+                GamepadAction::Stick { stick: st.clone(), x: *x, y: *y }
+            } else {
+                return Err("gamepad input must set either 'button' or 'stick'".to_string());
+            };
+
+            let Some(gp) = gamepad else {
+                return Err("controller bridge is not initialized on this platform".to_string());
+            };
+            let mut gp = gp.lock().await;
+            match action {
+                GamepadAction::Button { ref button } => {
+                    if *hold_ms > 0 {
+                        gp.press(&action)?;
+                        tokio::time::sleep(Duration::from_millis(*hold_ms)).await;
+                        gp.release(&action)?;
+                    } else {
+                        gamepad::click(&mut gp, &action)?;
+                    }
+                    let _ = button;
+                }
+                GamepadAction::Stick { .. } => {
+                    if *hold_ms > 0 {
+                        gp.set_stick(&action)?;
+                        tokio::time::sleep(Duration::from_millis(*hold_ms)).await;
+                        gp.release_stick(&action)?;
+                    } else {
+                        gp.set_stick(&action)?;
+                        gp.release_stick(&action)?;
+                    }
+                }
+            }
+            Ok(())
+        }
+        _ => {
+            // Keyboard / mouse: enigo on a blocking thread.
+            let spec = spec.clone();
+            tokio::task::spawn_blocking(move || simulate(&spec))
+                .await
+                .map_err(|e| format!("input thread: {e}"))?
+        }
+    }
 }
 
 // ── connection / message loop ─────────────────────────────────────────────
@@ -236,9 +320,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = load_config(Path::new("config.json"));
 
+    // Create the virtual gamepad once (a uinput device / ViGEm target); it
+    // survives reconnects. On macOS this is a stub that reports unsupported.
+    let gamepad: Option<Arc<AsyncMutex<Gamepad>>> = match Gamepad::create() {
+        Ok(g) => {
+            info!("controller bridge: {}supported", if Gamepad::supported() { "" } else { "not " });
+            Some(Arc::new(AsyncMutex::new(g)))
+        }
+        Err(e) => {
+            warn!("controller bridge unavailable: {e}");
+            None
+        }
+    };
+
     let cfg = config.clone();
+    let gamepad_task = gamepad.clone();
     tokio::spawn(async move {
-        session_loop(&cfg).await;
+        session_loop(&cfg, gamepad_task).await;
     });
 
     loop {
@@ -246,10 +344,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-async fn session_loop(config: &Config) {
+async fn session_loop(config: &Config, gamepad: Option<Arc<AsyncMutex<Gamepad>>>) {
     let mut backoff = config.reconnect_base_secs;
     loop {
-        match run_session(config).await {
+        match run_session(config, gamepad.clone()).await {
             Ok(()) => {}
             Err(e) => error!("session error: {e}"),
         }
@@ -259,7 +357,7 @@ async fn session_loop(config: &Config) {
     }
 }
 
-async fn run_session(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_session(config: &Config, gamepad: Option<Arc<AsyncMutex<Gamepad>>>) -> Result<(), Box<dyn std::error::Error>> {
     let client = CockatielClient::connect("config.json").await?;
     let (write, read) = client.stream.split();
     let write_shared: Arc<AsyncMutex<WsWriteHalf>> = Arc::new(AsyncMutex::new(write));
@@ -363,7 +461,7 @@ async fn run_session(config: &Config) -> Result<(), Box<dyn std::error::Error>> 
                 };
 
                 let handle = chat.user_data.as_ref().map(|u| u.username.clone()).unwrap_or_default();
-                match simulate(spec) {
+                match simulate_input(spec, gamepad.as_ref()).await {
                     Ok(()) => {
                         info!("fired input '{name}' for {handle}");
                         send_to_chat(
@@ -431,5 +529,35 @@ mod tests {
         );
         assert!(cfg.inputs.contains_key("left-click"));
         assert!(!cfg.inputs.contains_key("rm -rf"), "chat can never name an unlisted input");
+    }
+
+    #[test]
+    fn gamepad_inputs_parse_from_config() {
+        // A gamepad input deserializes from the whitelist and maps to the
+        // right GamepadAction (button vs stick).
+        let cfg: Config = serde_json::from_value(serde_json::json!({
+            "inputs": {
+                "jump":   { "kind": "gamepad", "button": "A" },
+                "left":   { "kind": "gamepad", "stick": "left", "x": -1.0, "y": 0.0 },
+                "sprint": { "kind": "gamepad", "button": "RT", "hold_ms": 1500 }
+            }
+        })).unwrap_or_default();
+        match cfg.inputs.get("jump") {
+            Some(InputSpec::Gamepad { button, stick, .. }) => {
+                assert_eq!(button.as_deref(), Some("A"));
+                assert!(stick.is_none());
+            }
+            other => panic!("jump should be a gamepad button input, got {other:?}"),
+        }
+        match cfg.inputs.get("left") {
+            Some(InputSpec::Gamepad { button, stick, x, y, .. }) => {
+                assert!(button.is_none());
+                assert_eq!(stick.as_deref(), Some("left"));
+                assert!((x - -1.0).abs() < 1e-9);
+                assert!(y.abs() < 1e-9);
+            }
+            other => panic!("left should be a gamepad stick input, got {other:?}"),
+        }
+        assert!(cfg.inputs.contains_key("sprint"));
     }
 }
