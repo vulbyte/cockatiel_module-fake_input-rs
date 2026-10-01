@@ -4,8 +4,11 @@
   "version": "0.1.0",
   "capabilities": "preprocess",
   "root_file": "./src/main.rs",
-  "launch_command": "cargo run",
-  "command_flags": ["--release"],
+  "launch_command": "cargo",
+  "command_flags": [
+    "run",
+    "--release"
+  ],
   "binary": {
     "linux": {
       "aarch64": "target/release/cockatiel_fake_input",
@@ -24,9 +27,17 @@
     }
   },
   "build_command": "cargo",
-  "build_flags": ["build", "--release"],
+  "build_flags": [
+    "build",
+    "--release"
+  ],
   "credentials": [
-    { "key": "price", "label": "Score cost per input", "list": false, "sensitive": false }
+    {
+      "key": "price",
+      "label": "Score cost per input",
+      "list": false,
+      "sensitive": false
+    }
   ],
   "autostart": false,
   "authority": 0,
