@@ -58,7 +58,7 @@ struct Config {
     command_flag: String,
     /// How much score a viewer must spend to trigger an input. Deducted from
     /// their CURRENT score; the lifetime total is untouched.
-    price: u64,
+    price: u32,
     /// The whitelist of inputs viewers may trigger: friendly name -> an input
     /// spec. Anything NOT listed here is refused, so chat can never fire an
     /// arbitrary key. e.g.
@@ -67,8 +67,8 @@ struct Config {
     ///   "jump":       {"kind":"key","char":" "}
     inputs: HashMap<String, InputSpec>,
     /// Reconnect backoff bounds (seconds).
-    reconnect_base_secs: u64,
-    reconnect_max_secs: u64,
+    reconnect_base_secs: u32,
+    reconnect_max_secs: u32,
 }
 
 impl Default for Config {
@@ -94,7 +94,7 @@ enum InputSpec {
         char: String,
         /// How long to hold the key (ms). 0/absent = a quick tap (click).
         #[serde(default)]
-        hold_ms: u64,
+        hold_ms: u32,
     },
     /// A mouse button click.
     #[serde(rename = "mouse")]
@@ -124,13 +124,13 @@ enum InputSpec {
         stick: Option<String>,
         /// Stick x position in [-1, 1] (when `stick` is set).
         #[serde(default)]
-        x: f64,
+        x: f32,
         /// Stick y position in [-1, 1] (when `stick` is set).
         #[serde(default)]
-        y: f64,
+        y: f32,
         /// How long to hold (ms). 0 = a tap / short push.
         #[serde(default)]
-        hold_ms: u64,
+        hold_ms: u32,
     },
 }
 
@@ -163,7 +163,7 @@ fn simulate(spec: &InputSpec) -> Result<(), String> {
                 enigo
                     .key(Key::Unicode(c), Direction::Press)
                     .map_err(|e| format!("key press: {e}"))?;
-                std::thread::sleep(Duration::from_millis(*hold_ms));
+                std::thread::sleep(Duration::from_millis(*hold_ms as u64));
                 enigo
                     .key(Key::Unicode(c), Direction::Release)
                     .map_err(|e| format!("key release: {e}"))?;
@@ -220,7 +220,7 @@ async fn simulate_input(spec: &InputSpec, gamepad: Option<&Arc<AsyncMutex<Gamepa
                 GamepadAction::Button { ref button } => {
                     if *hold_ms > 0 {
                         gp.press(&action)?;
-                        tokio::time::sleep(Duration::from_millis(*hold_ms)).await;
+                        tokio::time::sleep(Duration::from_millis(*hold_ms as u64)).await;
                         gp.release(&action)?;
                     } else {
                         gamepad::click(&mut gp, &action)?;
@@ -230,7 +230,7 @@ async fn simulate_input(spec: &InputSpec, gamepad: Option<&Arc<AsyncMutex<Gamepa
                 GamepadAction::Stick { .. } => {
                     if *hold_ms > 0 {
                         gp.set_stick(&action)?;
-                        tokio::time::sleep(Duration::from_millis(*hold_ms)).await;
+                        tokio::time::sleep(Duration::from_millis(*hold_ms as u64)).await;
                         gp.release_stick(&action)?;
                     } else {
                         gp.set_stick(&action)?;
@@ -353,7 +353,7 @@ async fn session_loop(config: &Config, gamepad: Option<Arc<AsyncMutex<Gamepad>>>
             Err(e) => error!("session error: {e}"),
         }
         warn!("engine disconnected — reconnecting in {backoff}s");
-        tokio::time::sleep(Duration::from_secs(backoff)).await;
+        tokio::time::sleep(Duration::from_secs(backoff as u64)).await;
         backoff = (backoff * 2).min(config.reconnect_max_secs.max(1));
     }
 }

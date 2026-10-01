@@ -16,8 +16,8 @@ pub enum GamepadAction {
     /// Move a stick to a position in [-1, 1]; `-1/1` are the extremes.
     Stick {
         stick: String,
-        x: f64,
-        y: f64,
+        x: f32,
+        y: f32,
     },
 }
 
@@ -46,7 +46,7 @@ pub struct Gamepad {
     /// Button/stick state so a release only happens after a press (a stick is
     /// never double-centered, a button never double-released).
     buttons_held: std::collections::HashSet<String>,
-    sticks_held: std::collections::HashMap<String, (f64, f64)>,
+    sticks_held: std::collections::HashMap<String, (f32, f32)>,
 }
 
 #[cfg(target_os = "macos")]
@@ -396,10 +396,10 @@ impl Gamepad {
     }
 
     #[cfg(target_os = "linux")]
-    fn linux_set_stick(&mut self, name: &str, x: f64, y: f64) -> Result<(), String> {
+    fn linux_set_stick(&mut self, name: &str, x: f32, y: f32) -> Result<(), String> {
         use evdev::{AbsoluteAxisCode, AbsoluteAxisEvent};
         let (x_axis, y_axis) = self.linux_stick_axes(name);
-        let scale = |v: f64| -> i32 { (v.clamp(-1.0, 1.0) * 32767.0) as i32 };
+        let scale = |v: f32| -> i32 { (v.clamp(-1.0, 1.0) * 32767.0) as i32 };
         let events = vec![
             AbsoluteAxisEvent::new(x_axis, scale(x)).into(),
             AbsoluteAxisEvent::new(y_axis, scale(y)).into(),
@@ -441,7 +441,7 @@ impl Gamepad {
     #[cfg(target_os = "windows")]
     fn windows_report(
         buttons: &std::collections::HashSet<String>,
-        sticks: &std::collections::HashMap<String, (f64, f64)>,
+        sticks: &std::collections::HashMap<String, (f32, f32)>,
     ) -> vigem_rust::X360Report {
         use vigem_rust::{X360Button, X360Report};
         let mut report = X360Report::default();
@@ -465,7 +465,7 @@ impl Gamepad {
             report.buttons.insert(b);
         }
         // Sticks: clamp [-1,1] to the XInput i16 range.
-        let scale = |v: f64| -> i16 { (v.clamp(-1.0, 1.0) * 32767.0) as i16 };
+        let scale = |v: f32| -> i16 { (v.clamp(-1.0, 1.0) * 32767.0) as i16 };
         if let Some((x, y)) = sticks.get("left") {
             report.thumb_lx = scale(*x);
             report.thumb_ly = scale(*y);
@@ -495,7 +495,7 @@ impl Gamepad {
         self.windows_update()
     }
     #[cfg(target_os = "windows")]
-    fn windows_set_stick(&mut self, _n: &str, _x: f64, _y: f64) -> Result<(), String> {
+    fn windows_set_stick(&mut self, _n: &str, _x: f32, _y: f32) -> Result<(), String> {
         self.windows_update()
     }
     #[cfg(target_os = "windows")]
